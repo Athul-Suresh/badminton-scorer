@@ -1,10 +1,17 @@
 "use client";
 
+import { GameType } from "../hooks/useBadmintonGame";
+
 interface CourtVisualizerProps {
   server: "A" | "B";
   scoreA: number;
   scoreB: number;
   matchWinner: "A" | "B" | null;
+  gameType: GameType;
+  teamAPlayerInRight: number;
+  teamBPlayerInRight: number;
+  teamANames: string[];
+  teamBNames: string[];
 }
 
 export default function CourtVisualizer({
@@ -12,46 +19,32 @@ export default function CourtVisualizer({
   scoreA,
   scoreB,
   matchWinner,
+  gameType,
+  teamAPlayerInRight,
+  teamBPlayerInRight,
+  teamANames,
+  teamBNames,
 }: CourtVisualizerProps) {
   // Dimensions (Standard approximation)
   const width = 1340;
   const height = 610;
   const padding = 50;
 
-  // Lines relative to center
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const shortServiceDist = 198; // 1.98m from net
-  const longServiceDoublesDist = 396; // 0.76m from back (back is 6.7m from net - 0.76 = 5.94? No. Back boundary is 6.7m. Long service doubles is 0.76m shorter.)
-  // Actually simpler:
-  // Net at 0.
-  // Short Service Line: +/- 198
-  // Back Boundary: +/- 670
-  // Doubles Long Service: +/- 594 (670 - 76)
-  // Side Lines: +/- 305 (width/2) and +/- 259 (Singles width/2 = 5.18m / 2)
-
-  // Let's use coordinate system: 0,0 at top-left of SVG.
-  // Court starts at padding, padding.
-  // Total Court: 1340 x 610
-
   const courtX = padding;
   const courtY = padding;
   const courtW = 1340;
   const courtH = 610;
-
-  // Net is at x = padding + 670
+  const centerX = width / 2;
+  const centerY = height / 2;
   const netX = courtX + 670;
 
-  // Logic for Active Box
-  // Team A (Left Side)
-  // Even: Bottom-Left (Right Service Court) -> x:[0, net-198], y:[centerY, height]
-  // Odd: Top-Left (Left Service Court) -> x:[0, net-198], y:[0, centerY]
-
-  // Team B (Right Side)
-  // Even: Top-Right (Right Service Court - facing net) -> x:[net+198, end], y:[0, centerY]
-  // Wait, if B is on Right, facing Left (Net):
-  // Right hand is Top of screen. So Top-Right quadrant.
-  // Odd: Bottom-Right -> x:[net+198, end], y:[centerY, height]
+  // Dimensions
+  // Short Service Line: 1.98m from net (approx 198 units)
+  const shortServiceOffset = 198;
+  // Doubles Long Service Line: 0.76m from back (76 units)
+  const doublesLongServiceOffset = 76;
+  // Singles Side Line: 0.46m from side (46 units)
+  const singlesSideOffset = 46;
 
   const isServerA = server === "A";
   const serverScore = isServerA ? scoreA : scoreB;
@@ -59,31 +52,67 @@ export default function CourtVisualizer({
 
   let activeBox = null;
 
+  // Logic for Active Service Box (The SERVER'S Box)
+  // We highlight where the server stands/serves from.
   if (!matchWinner) {
+    let xStart = 0,
+      xEnd = 0,
+      yStart = 0,
+      yEnd = 0;
+
+    // 1. Determine Side (Left/Right)
+    const isLeftSide = isServerA; // Highlight Server Side
+
+    // 2. Determine Quadrant based on Score
+    // Team A (Left):
+    //   Even -> Right Service Court (Bottom).
+    //   Odd -> Left Service Court (Top).
+    // Team B (Right Facing Left):
+    //   Even -> Right Service Court (Top).
+    //   Odd -> Left Service Court (Bottom).
+
+    let isTopQuadrant = false;
+
     if (isServerA) {
-      // Left Side
-      if (isEven) {
-        // Bottom-Left
-        activeBox = { x: courtX, y: centerY + padding, w: 670 - 198, h: 305 }; // Approx
-      } else {
-        // Top-Left
-        activeBox = { x: courtX, y: padding, w: 670 - 198, h: 305 };
-      }
+      // A (Left): Even is Bottom (Right Court), Odd is Top (Left Court)
+      isTopQuadrant = !isEven;
     } else {
-      // Right Side
-      if (isEven) {
-        // Top-Right
-        activeBox = { x: netX + 198, y: padding, w: 670 - 198, h: 305 };
-      } else {
-        // Bottom-Right
-        activeBox = {
-          x: netX + 198,
-          y: centerY + padding,
-          w: 670 - 198,
-          h: 305,
-        };
-      }
+      // B (Right): Even is Top (Right Court), Odd is Bottom (Left Court)
+      isTopQuadrant = isEven;
     }
+
+    // 3. Determine Box Boundaries based on Singles/Doubles
+    // Highlighting the Server's box implies the area they serve *from*.
+
+    if (isLeftSide) {
+      // A's Side
+      xStart =
+        gameType === "singles" ? courtX : courtX + doublesLongServiceOffset;
+      xEnd = netX - shortServiceOffset;
+    } else {
+      // B's Side
+      xStart = netX + shortServiceOffset;
+      xEnd =
+        gameType === "singles"
+          ? courtX + courtW
+          : courtX + courtW - doublesLongServiceOffset;
+    }
+
+    if (isTopQuadrant) {
+      yStart = courtY;
+      yEnd = courtY + centerY;
+    } else {
+      yStart = courtY + centerY;
+      yEnd = courtY + courtH;
+    }
+
+    // Width constraint for Singles (Side lines)
+    if (gameType === "singles") {
+      if (isTopQuadrant) yStart += singlesSideOffset;
+      else yEnd -= singlesSideOffset;
+    }
+
+    activeBox = { x: xStart, y: yStart, w: xEnd - xStart, h: yEnd - yStart };
   }
 
   // Define Styles
@@ -91,12 +120,152 @@ export default function CourtVisualizer({
   const lineColor = "white";
   const lineWidth = 6;
 
+  // Player Dots Helper
+  const getPlayerPosition = (team: "A" | "B", index: number) => {
+    // Position X:
+    //   Team A (Left Side): approx 1/4 of court width.
+    //   Team B (Right Side): approx 3/4 of court width.
+    const baseX =
+      team === "A" ? courtX + courtW / 4 : courtX + (courtW * 3) / 4;
+
+    let isRightCourt = false;
+    if (team === "A") {
+      isRightCourt = index === teamAPlayerInRight;
+    } else {
+      isRightCourt = index === teamBPlayerInRight;
+    }
+
+    // For A: Right is Bottom. Left is Top.
+    // For B: Right is Top. Left is Bottom.
+    let isBottom = false;
+    if (team === "A")
+      isBottom = isRightCourt; // A Right is Bottom
+    else isBottom = !isRightCourt; // B Right is Top. So Not Right (Left) is Bottom.
+
+    const baseY = isBottom
+      ? centerY + padding + courtH / 4
+      : padding + courtH / 4;
+
+    return { cx: baseX, cy: baseY, isBottom };
+  };
+
+  const renderPlayer = (team: "A" | "B", index: number, name: string) => {
+    const { cx, cy } = getPlayerPosition(team, index);
+    // Differentiate colors nicely
+    const fillColor =
+      team === "A"
+        ? index === 0
+          ? "blue"
+          : "#60a5fa"
+        : index === 0
+          ? "red"
+          : "#f87171";
+
+    return (
+      <g key={`${team}${index}`}>
+        <circle
+          cx={cx}
+          cy={cy}
+          r="20"
+          fill={fillColor}
+          stroke="white"
+          strokeWidth="2"
+        />
+        <text
+          x={cx}
+          y={cy + 40} // Below dot
+          textAnchor="middle"
+          fill="white"
+          fontSize="24"
+          fontWeight="bold"
+          style={{ textShadow: "0px 1px 3px rgba(0,0,0,0.8)" }}
+        >
+          {name}
+        </text>
+      </g>
+    );
+  };
+
+  const renderPlayers = () => {
+    const players = [];
+
+    if (gameType === "singles") {
+      // Singles: 1 player per side.
+
+      // A
+      const isARight = scoreA % 2 === 0; // Even -> Right (Bottom)
+      const posA = isARight
+        ? centerY + padding + courtH / 4
+        : padding + courtH / 4;
+      players.push(
+        <g key="A">
+          <circle
+            cx={courtX + courtW / 4}
+            cy={posA}
+            r="20"
+            fill="blue"
+            stroke="white"
+            strokeWidth="2"
+          />
+          <text
+            x={courtX + courtW / 4}
+            y={posA + 40}
+            textAnchor="middle"
+            fill="white"
+            fontSize="24"
+            fontWeight="bold"
+            style={{ textShadow: "0px 1px 3px rgba(0,0,0,0.8)" }}
+          >
+            {teamANames[0] || "Player A"}
+          </text>
+        </g>,
+      );
+
+      // B
+      const isBRight = scoreB % 2 === 0; // Even -> Right (Top)
+      const posB = isBRight
+        ? padding + courtH / 4
+        : centerY + padding + courtH / 4;
+      players.push(
+        <g key="B">
+          <circle
+            cx={courtX + (courtW * 3) / 4}
+            cy={posB}
+            r="20"
+            fill="red"
+            stroke="white"
+            strokeWidth="2"
+          />
+          <text
+            x={courtX + (courtW * 3) / 4}
+            y={posB + 40}
+            textAnchor="middle"
+            fill="white"
+            fontSize="24"
+            fontWeight="bold"
+            style={{ textShadow: "0px 1px 3px rgba(0,0,0,0.8)" }}
+          >
+            {teamBNames[0] || "Player B"}
+          </text>
+        </g>,
+      );
+    } else {
+      // Doubles
+      players.push(renderPlayer("A", 0, teamANames[0] || "A1"));
+      players.push(renderPlayer("A", 1, teamANames[1] || "A2"));
+      players.push(renderPlayer("B", 0, teamBNames[0] || "B1"));
+      players.push(renderPlayer("B", 1, teamBNames[1] || "B2"));
+    }
+
+    return players;
+  };
+
   return (
     <div className="w-full flex items-center justify-center py-4 bg-zinc-900 border-t border-b border-zinc-800">
       <div className="w-full max-w-[500px] aspect-[2.2/1] relative">
         <svg
           viewBox={`0 0 ${width + padding * 2} ${height + padding * 2}`}
-          className="w-full h-full drop-shadow-lg"
+          className="w-full h-full drop-shadow-lg select-none"
           xmlns="http://www.w3.org/2000/svg"
         >
           {/* Main Court Background */}
@@ -108,7 +277,7 @@ export default function CourtVisualizer({
             fill={bgColor}
           />
 
-          {/* Highlight Active Box */}
+          {/* Highlight Active Box (Server's Box) */}
           {activeBox && (
             <rect
               x={activeBox.x}
@@ -131,75 +300,75 @@ export default function CourtVisualizer({
             strokeWidth={lineWidth}
           />
 
-          {/* Singles Side Lines (Inner horizontal lines if landscape?) No, vertical in SVG coords? */}
-          {/* Side lines are Y-axis restrictions. 6.1m vs 5.18m. Diff is 0.46m per side = 46 units */}
+          {/* Singles Side Lines (Inner horizontal lines) */}
           <line
             x1={courtX}
-            y1={courtY + 46}
+            y1={courtY + singlesSideOffset}
             x2={courtX + courtW}
-            y2={courtY + 46}
+            y2={courtY + singlesSideOffset}
             stroke={lineColor}
             strokeWidth={lineWidth}
+            opacity={gameType === "singles" ? 1 : 0.5}
           />
           <line
             x1={courtX}
-            y1={courtY + courtH - 46}
+            y1={courtY + courtH - singlesSideOffset}
             x2={courtX + courtW}
-            y2={courtY + courtH - 46}
+            y2={courtY + courtH - singlesSideOffset}
             stroke={lineColor}
             strokeWidth={lineWidth}
+            opacity={gameType === "singles" ? 1 : 0.5}
           />
 
-          {/* Back Service Lines (Doubles) - Vertical lines near back */}
-          {/* 76 units from back */}
+          {/* Back Service Lines (Doubles) */}
           <line
-            x1={courtX + 76}
+            x1={courtX + doublesLongServiceOffset}
             y1={courtY}
-            x2={courtX + 76}
+            x2={courtX + doublesLongServiceOffset}
             y2={courtY + courtH}
             stroke={lineColor}
             strokeWidth={lineWidth}
+            opacity={gameType === "doubles" ? 1 : 0.5}
           />
           <line
-            x1={courtX + courtW - 76}
+            x1={courtX + courtW - doublesLongServiceOffset}
             y1={courtY}
-            x2={courtX + courtW - 76}
+            x2={courtX + courtW - doublesLongServiceOffset}
             y2={courtY + courtH}
             stroke={lineColor}
             strokeWidth={lineWidth}
+            opacity={gameType === "doubles" ? 1 : 0.5}
           />
 
           {/* Short Service Lines (Near Net) */}
-          {/* 198 units from Net (Center) */}
           <line
-            x1={netX - 198}
+            x1={netX - shortServiceOffset}
             y1={courtY}
-            x2={netX - 198}
+            x2={netX - shortServiceOffset}
             y2={courtY + courtH}
             stroke={lineColor}
             strokeWidth={lineWidth}
           />
           <line
-            x1={netX + 198}
+            x1={netX + shortServiceOffset}
             y1={courtY}
-            x2={netX + 198}
+            x2={netX + shortServiceOffset}
             y2={courtY + courtH}
             stroke={lineColor}
             strokeWidth={lineWidth}
           />
 
-          {/* Center Line (dividing Left/Right service courts) */}
-          {/* From Short Service to Back Boundary */}
+          {/* Center Line */}
           <line
             x1={courtX}
             y1={centerY + padding}
-            x2={netX - 198}
+            x2={netX - shortServiceOffset}
             y2={centerY + padding}
             stroke={lineColor}
             strokeWidth={lineWidth}
           />
           <line
-            x1={netX + 198}
+            x1={netX + shortServiceOffset}
             y1={centerY + padding}
             x2={courtX + courtW}
             y2={centerY + padding}
@@ -218,16 +387,19 @@ export default function CourtVisualizer({
             strokeDasharray="10,5"
           />
 
-          {/* Player Icon / Shuttle */}
+          {renderPlayers()}
+
+          {/* Shuttle Icon */}
           {activeBox && (
-            <g
-              transform={`translate(${activeBox.x + activeBox.w / 2}, ${activeBox.y + activeBox.h / 2})`}
+            <text
+              x={activeBox.x + activeBox.w / 2}
+              y={activeBox.y + activeBox.h / 2 + 10}
+              textAnchor="middle"
+              fontSize="30"
+              className="animate-bounce"
             >
-              <circle r="30" fill="white" stroke="black" strokeWidth="2" />
-              <text y="10" textAnchor="middle" fontSize="20" fontWeight="bold">
-                🏸
-              </text>
-            </g>
+              🏸
+            </text>
           )}
         </svg>
       </div>

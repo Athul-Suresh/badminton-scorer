@@ -1,21 +1,25 @@
 "use client";
 
-import { useBadmintonGame, Player } from "../hooks/useBadmintonGame";
+import { useBadmintonGame, Player, GameType } from "../hooks/useBadmintonGame";
 import { useEffect } from "react";
 import CourtVisualizer from "./CourtVisualizer";
 
 interface ScoreboardProps {
-  teamA: string;
-  teamB: string;
-  onReset: () => void;
+  teamA: string[];
+  teamB: string[];
   initialServer: Player;
+  initialServerIndex: number;
+  gameType: GameType;
+  onEnd: () => void;
 }
 
 export default function Scoreboard({
   teamA,
   teamB,
-  onReset,
   initialServer,
+  initialServerIndex,
+  gameType,
+  onEnd,
 }: ScoreboardProps) {
   const {
     scoreA,
@@ -28,24 +32,28 @@ export default function Scoreboard({
     incrementScore,
     undo,
     resetMatch,
-  } = useBadmintonGame(initialServer);
+    gameType: currentGameType,
+    teamAPlayerInRight,
+    teamBPlayerInRight,
+  } = useBadmintonGame(initialServer, gameType, initialServerIndex);
 
   const handleReset = () => {
-    resetMatch(initialServer);
-    onReset();
+    resetMatch(initialServer, gameType);
+    onEnd();
   };
 
   useEffect(() => {
     if (matchWinner) {
       const historyItem = {
         date: new Date().toISOString(),
-        teamA,
-        teamB,
+        teamA: teamA.join(" & "),
+        teamB: teamB.join(" & "),
         scoreA,
         scoreB,
         setsWonA,
         setsWonB,
         matchWinner,
+        gameType,
       };
 
       try {
@@ -57,7 +65,28 @@ export default function Scoreboard({
         console.error("Failed to save history", e);
       }
     }
-  }, [matchWinner, scoreA, scoreB, setsWonA, setsWonB, teamA, teamB]);
+  }, [matchWinner, scoreA, scoreB, setsWonA, setsWonB, teamA, teamB, gameType]);
+
+  // Helper to determine active server name
+  const getServerName = (team: "A" | "B") => {
+    if (currentServer !== team) return null;
+    if (gameType === "singles") return null;
+
+    const names = team === "A" ? teamA : teamB;
+    const score = team === "A" ? scoreA : scoreB;
+    const playerInRight =
+      team === "A" ? teamAPlayerInRight : teamBPlayerInRight;
+
+    // Even Score -> Right Court Server
+    // Odd Score -> Left Court Server
+    const isEven = score % 2 === 0;
+    const serverIndex = isEven ? playerInRight : playerInRight === 0 ? 1 : 0;
+
+    return names[serverIndex];
+  };
+
+  const activeServerNameA = getServerName("A");
+  const activeServerNameB = getServerName("B");
 
   return (
     <div className="flex flex-col h-[90vh] w-full max-w-7xl mx-auto rounded-3xl overflow-hidden shadow-2xl bg-zinc-900 relative border border-zinc-800">
@@ -66,6 +95,9 @@ export default function Scoreboard({
         <div className="flex gap-2">
           <span className="font-mono bg-zinc-800 text-zinc-300 px-3 py-1 rounded-lg">
             SET {matchWinner ? "END" : currentSet}
+          </span>
+          <span className="font-mono bg-zinc-800 text-zinc-500 px-3 py-1 rounded-lg uppercase text-xs flex items-center">
+            {gameType}
           </span>
         </div>
         <div className="flex gap-2">
@@ -93,9 +125,21 @@ export default function Scoreboard({
           className="relative flex-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 transition-colors flex flex-col items-center justify-center p-8 group overflow-hidden h-1/2 md:h-full"
         >
           <div className="z-10 flex flex-col items-center gap-2 md:gap-4">
-            <h2 className="text-2xl md:text-5xl font-bold text-blue-100 tracking-wider uppercase drop-shadow-md">
-              {teamA}
-            </h2>
+            <div className="flex flex-col items-center">
+              {teamA.map((name, i) => (
+                <h2
+                  key={i}
+                  className={`text-2xl md:text-5xl font-bold tracking-wider uppercase drop-shadow-md ${
+                    activeServerNameA === name
+                      ? "text-yellow-300 scale-110"
+                      : "text-blue-100"
+                  } transition-all`}
+                >
+                  {name}
+                  {activeServerNameA === name && " 🏸"}
+                </h2>
+              ))}
+            </div>
             <div className="text-[6rem] md:text-[10rem] lg:text-[14rem] leading-none font-black text-white drop-shadow-2xl tabular-nums">
               {scoreA}
             </div>
@@ -104,21 +148,29 @@ export default function Scoreboard({
               {[0, 1].map((i) => (
                 <div
                   key={i}
-                  className={`w-4 h-4 rounded-full border-2 border-white/50 ${i < setsWonA ? "bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" : "bg-transparent"}`}
+                  className={`w-4 h-4 rounded-full border-2 border-white/50 ${
+                    i < setsWonA
+                      ? "bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]"
+                      : "bg-transparent"
+                  }`}
                 />
               ))}
             </div>
           </div>
         </button>
 
-        {/* Court Visualizer Integration */}
-
-        <div className="hidden md:flex flex-col justify-center bg-zinc-900 border-l border-r border-zinc-800 z-20 shadow-2xl p-4 min-w-[300px] lg:min-w-[400px]">
+        {/* Center Control Information / Visualizer */}
+        <div className="hidden md:flex flex-col justify-center bg-zinc-900 border-l border-r border-zinc-800 z-20 shadow-2xl p-0 min-w-[500px] xl:min-w-[700px]">
           <CourtVisualizer
             server={currentServer}
             scoreA={scoreA}
             scoreB={scoreB}
             matchWinner={matchWinner}
+            gameType={currentGameType}
+            teamAPlayerInRight={teamAPlayerInRight}
+            teamBPlayerInRight={teamBPlayerInRight}
+            teamANames={teamA}
+            teamBNames={teamB}
           />
         </div>
 
@@ -129,6 +181,11 @@ export default function Scoreboard({
             scoreA={scoreA}
             scoreB={scoreB}
             matchWinner={matchWinner}
+            gameType={gameType}
+            teamAPlayerInRight={teamAPlayerInRight}
+            teamBPlayerInRight={teamBPlayerInRight}
+            teamANames={teamA}
+            teamBNames={teamB}
           />
         </div>
 
@@ -139,9 +196,21 @@ export default function Scoreboard({
           className="relative flex-1 bg-red-600 hover:bg-red-500 active:bg-red-700 transition-colors flex flex-col items-center justify-center p-8 group overflow-hidden h-1/2 md:h-full"
         >
           <div className="z-10 flex flex-col items-center gap-2 md:gap-4">
-            <h2 className="text-2xl md:text-5xl font-bold text-red-100 tracking-wider uppercase drop-shadow-md">
-              {teamB}
-            </h2>
+            <div className="flex flex-col items-center">
+              {teamB.map((name, i) => (
+                <h2
+                  key={i}
+                  className={`text-2xl md:text-5xl font-bold tracking-wider uppercase drop-shadow-md ${
+                    activeServerNameB === name
+                      ? "text-yellow-300 scale-110"
+                      : "text-red-100"
+                  } transition-all`}
+                >
+                  {name}
+                  {activeServerNameB === name && " 🏸"}
+                </h2>
+              ))}
+            </div>
             <div className="text-[6rem] md:text-[10rem] lg:text-[14rem] leading-none font-black text-white drop-shadow-2xl tabular-nums">
               {scoreB}
             </div>
@@ -150,7 +219,11 @@ export default function Scoreboard({
               {[0, 1].map((i) => (
                 <div
                   key={i}
-                  className={`w-4 h-4 rounded-full border-2 border-white/50 ${i < setsWonB ? "bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" : "bg-transparent"}`}
+                  className={`w-4 h-4 rounded-full border-2 border-white/50 ${
+                    i < setsWonB
+                      ? "bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]"
+                      : "bg-transparent"
+                  }`}
                 />
               ))}
             </div>
@@ -166,9 +239,13 @@ export default function Scoreboard({
               Match Winner
             </h3>
             <div
-              className={`text-4xl md:text-6xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r ${matchWinner === "A" ? "from-blue-500 to-indigo-500" : "from-red-500 to-orange-500"}`}
+              className={`text-4xl md:text-6xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r ${
+                matchWinner === "A"
+                  ? "from-blue-500 to-indigo-500"
+                  : "from-red-500 to-orange-500"
+              }`}
             >
-              {matchWinner === "A" ? teamA : teamB}
+              {matchWinner === "A" ? teamA.join(" & ") : teamB.join(" & ")}
             </div>
 
             <div className="flex flex-col gap-3">
