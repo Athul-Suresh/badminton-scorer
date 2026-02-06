@@ -1,4 +1,4 @@
-import BadmintonMatch from "../components/BadmintonMatch";
+import BadmintonMatch from "./components/BadmintonMatch";
 
 export default function Home() {
   return <BadmintonMatch />;
